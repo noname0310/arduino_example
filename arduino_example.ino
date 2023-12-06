@@ -20,7 +20,7 @@
 #define _DUTY_MIN 1150
 
 #define _SERVO_ANGLE_DIFF  25  // Replace with |D - E| degree
-#define _SERVO_SPEED       100  // servo speed
+#define _SERVO_SPEED       80  // servo speed
 
 // Target Distance : not important in D-only control
 #define _DIST_TARGET    175 // Center of the rail (unit:mm)
@@ -46,7 +46,7 @@ int duty_change_per_interval;     // maximum duty difference per interval
 int duty_target, duty_current;
 
 int error_current, error_prev;
-float pterm, dterm /*, iterm */;
+float pterm, dterm, iterm;
 
 void setup()
 {
@@ -95,6 +95,7 @@ void loop()
 
     // Update PID variables
     error_current = _DIST_TARGET - dist_ema;
+
     pterm = (_KP * error_current * abs(error_current)) / 150.0;
     dterm = _KD * (error_current - error_prev);
     // iterm here
@@ -135,27 +136,17 @@ void loop()
   
   if (event_serial) {
     event_serial = false;
-
-    if (0) { // for debugging
-      Serial.print("DIST:");
-      Serial.print(dist_ema);
-      Serial.print(",_DIST_TARGET:"),
-      Serial.print(_DIST_TARGET);
-      Serial.print(",ERROR:");
-      Serial.print(error_current);
-      Serial.print(",duty_target:");
-      Serial.print(duty_target);
-      Serial.print(",duty_current:");
-      Serial.print(duty_current);  
-      Serial.print(",("); 
-      Serial.print(duty_change_per_interval); 
-      Serial.print("),dterm:");
-      Serial.println(dterm);
-    } else {  // For evaluation
-      Serial.print("MIN:0,MAX:300");
-      Serial.print(",DIST:");
-      Serial.println(dist_ema);  
+    
+    // use for debugging
+    if (0) {
+      Serial.print(",ERROR:"); Serial.print(error_current); 
+      Serial.print(",pterm:"); Serial.print(pterm);
+      Serial.print(",dterm:"); Serial.print(dterm);
+      Serial.print(",duty_target:"); Serial.print(duty_target);
+      Serial.print(",duty_current:"); Serial.print(duty_current);
     }
+    Serial.print("MIN:0,MAX:300,TARGET:175,TG_LO:148,TG_HI:202,DIST:"); 
+    Serial.println(dist_ema);
   }
 }
 

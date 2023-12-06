@@ -15,120 +15,147 @@
                           // Setting EMA to 1 effectively disables EMA filter.
 
 // Servo adjustment - Set _DUTY_MAX, _NEU, _MIN with your own numbers
-#define _DUTY_NEU 1652  
-#define _DUTY_MAX 2044
-#define _DUTY_MIN 1139
+#define _DUTY_MAX 1900
+#define _DUTY_NEU 1540
+#define _DUTY_MIN 1150
 
 #define _SERVO_ANGLE_DIFF  25  // Replace with |D - E| degree
 #define _SERVO_SPEED       100  // servo speed
 
-#define _BANGBANG_RANGE    600  // duty up and down for bangbang control
-
-// Target Distance
+// Target Distance : not important in D-only control
 #define _DIST_TARGET    175 // Center of the rail (unit:mm)
+
+// PID parameters
+//#define _KP  0.0   // proportional gain
+#define _KD 0.2      // derivative gain
+//#define _KI 0.0    // integral gain
 
 // global variables
 
 Servo myservo;
+float dist_ema;   // Filtered distance
 
-float dist_ema;     // unit: mm
+// Event periods
+unsigned long last_sampling_time_dist, last_sampling_time_servo, last_sampling_time_serial; // unit: ms
+bool event_dist, event_servo, event_serial;
 
-int duty_change_per_interval; // maximum duty difference per interval
-int duty_target;    // Target duty
-int duty_current;      // Current duty
-int duty_adj;       // Level adjustment
+// Servo speed control
+int duty_change_per_interval;     // maximum duty difference per interval
 
-unsigned long last_sampling_time_dist;   // unit: msec
-unsigned long last_sampling_time_servo;  // unit: msec
-unsigned long last_sampling_time_serial; // unit: msec
+// Servo position
+int duty_target, duty_current;
 
-bool event_dist, event_servo, event_serial; // event triggered?
+int error_current, error_prev;
+float /* pterm, */ dterm /*, iterm */;
 
 void setup()
 {
   // initialize GPIO pins
   pinMode(PIN_LED,OUTPUT);
+  
   myservo.attach(PIN_SERVO);
-
   duty_target = duty_current = _DUTY_NEU;
-  myservo.writeMicroseconds(duty_current);
+  myservo.writeMicroseconds(duty_current);    
 
-  // initialize serial port
-  Serial.begin(1000000);  
-    
-  // convert angular speed into duty change per interval.
+  // convert speed into duty change per interval.
   duty_change_per_interval = 
     (float)(_DUTY_MAX - _DUTY_MIN) * ((float)_SERVO_SPEED / _SERVO_ANGLE_DIFF) * (_INTERVAL_SERVO / 1000.0); 
+  
+  // initialize serial port
+  Serial.begin(1000000);  
 }
-
+  
 void loop()
 {
   unsigned long time_curr = millis();
   
   // wait until next event time
   if (time_curr >= (last_sampling_time_dist + _INTERVAL_DIST)) {
-        last_sampling_time_dist += _INTERVAL_DIST;
-        event_dist = true;
+    last_sampling_time_dist += _INTERVAL_DIST;
+    event_dist = true;
   }
   if (time_curr >= (last_sampling_time_servo + _INTERVAL_SERVO)) {
-        last_sampling_time_servo += _INTERVAL_SERVO;
-        event_servo = true;
+    last_sampling_time_servo += _INTERVAL_SERVO;
+    event_servo = true;
   }
   if (time_curr >= (last_sampling_time_serial + _INTERVAL_SERIAL)) {
-        last_sampling_time_serial += _INTERVAL_SERIAL;
-        event_serial = true;
+    last_sampling_time_serial += _INTERVAL_SERIAL;
+    event_serial = true;
   }
-    
+
   if (event_dist) {
     float dist_filtered; // unit: mm
+    int control;
+    
     event_dist = false;
 
     // get a distance reading from the distance sensor
     dist_filtered = volt_to_distance(ir_sensor_filtered(50, 0.5, 0));
     dist_ema = _EMA_ALPHA * dist_filtered + (1.0 - _EMA_ALPHA) * dist_ema;
 
-    // bang bang control
-    if (dist_ema > _DIST_TARGET) {
-      duty_target = _DUTY_NEU - _BANGBANG_RANGE;
-      digitalWrite(PIN_LED, 0);
-    } else if (dist_ema < _DIST_TARGET) {
-      duty_target = _DUTY_NEU + _BANGBANG_RANGE;
+    // Update PID variables
+    error_current = _DIST_TARGET - dist_ema;
+    // pterm here
+    dterm = _KD * (error_current - error_prev);
+    // iterm here
+    
+    control = /* pterm + */ dterm /* + iterm */;
+    error_prev = error_current;
+        
+    duty_target = _DUTY_NEU + control;
+
+    // Limit duty_target within the range of [_DUTY_MIN, _DUTY_MAX]
+    if (duty_target < _DUTY_MIN)
+      duty_target = _DUTY_MIN; // lower limit
+    if (duty_target > _DUTY_MAX)
+      duty_target = _DUTY_MAX; // upper limit 
+      
+    if (error_current > 0)
       digitalWrite(PIN_LED, 1);
-    }
+    else
+      digitalWrite(PIN_LED, 0);
   }
   
   if (event_servo) {
     event_servo = false;
      
-    // adjust duty_current toward duty_target by duty_change_per_interval
+    // adjust duty_curr toward duty_target by duty_change_per_interval
     if (duty_target > duty_current) {
       duty_current += duty_change_per_interval;
       if (duty_current > duty_target)
           duty_current = duty_target;
-    } else if (duty_target < duty_current) {
+    } else {
       duty_current -= duty_change_per_interval;
       if (duty_current < duty_target)
         duty_current = duty_target;
     }
-    
-    // servo arm protection
-    if (duty_current < _DUTY_MIN)
-      duty_current = _DUTY_MIN;
-    else if (duty_current > _DUTY_MAX) 
-      duty_current = _DUTY_MAX;
 
-    // update servo position
     myservo.writeMicroseconds(duty_current);
   }
   
   if (event_serial) {
     event_serial = false;
-    
-    // output the read value to the serial port
-    Serial.print("TARGET:"); Serial.print(_DIST_TARGET);
-    Serial.print(",DIST:"); Serial.print(dist_ema);
-    Serial.print(",duty_target:"); Serial.print(duty_target);
-    Serial.print(",duty_current:"); Serial.println(duty_current);
+
+    if (0) { // for debugging
+      Serial.print("DIST:");
+      Serial.print(dist_ema);
+      Serial.print(",_DIST_TARGET:"),
+      Serial.print(_DIST_TARGET);
+      Serial.print(",ERROR:");
+      Serial.print(error_current);
+      Serial.print(",duty_target:");
+      Serial.print(duty_target);
+      Serial.print(",duty_current:");
+      Serial.print(duty_current);  
+      Serial.print(",("); 
+      Serial.print(duty_change_per_interval); 
+      Serial.print("),dterm:");
+      Serial.println(dterm);
+    } else {  // For evaluation
+      Serial.print("MIN:0,MAX:300");
+      Serial.print(",DIST:");
+      Serial.println(dist_ema);  
+    }
   }
 }
 

@@ -26,7 +26,7 @@
 #define _DIST_TARGET    175 // Center of the rail (unit:mm)
 
 // PID parameters
-//#define _KP  0.0   // proportional gain
+#define _KP 3.5      // proportional gain
 #define _KD 0.2      // derivative gain
 //#define _KI 0.0    // integral gain
 
@@ -46,7 +46,7 @@ int duty_change_per_interval;     // maximum duty difference per interval
 int duty_target, duty_current;
 
 int error_current, error_prev;
-float /* pterm, */ dterm /*, iterm */;
+float pterm, dterm /*, iterm */;
 
 void setup()
 {
@@ -95,11 +95,11 @@ void loop()
 
     // Update PID variables
     error_current = _DIST_TARGET - dist_ema;
-    // pterm here
+    pterm = (_KP * error_current * abs(error_current)) / 150.0;
     dterm = _KD * (error_current - error_prev);
     // iterm here
     
-    control = /* pterm + */ dterm /* + iterm */;
+    control = pterm + dterm /* + iterm */;
     error_prev = error_current;
         
     duty_target = _DUTY_NEU + control;
